@@ -3,7 +3,7 @@ requires = ["setuptools>=62.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pfsense-backup"
+name = "pfsense_backup"
 version = "0.0.1"
 authors = [
   { name="Stanislav Meduna", email="stano@meduna.org" },
