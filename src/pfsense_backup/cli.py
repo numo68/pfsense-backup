@@ -13,7 +13,7 @@ from schema import Schema, SchemaError, And, Or, Optional, Use
 
 import pfbackup
 
-__version__ = "0.2.1"
+__version__ = "0.2.3"
 
 DEFAULT_CONFIGURATION_FILE = path.join(
     environ["HOME"], ".config", "pfsense-backup", "config.yml"
@@ -148,6 +148,11 @@ def rotate_files(output_config: dict):
         remove(path.join(output_config["directory"], files.pop(0)))
 
 
+def labels(pfsense_config):
+    """Output Prometheus labels"""
+    return f'{{url="{ pfsense_config["url"] }"}}'
+
+
 def main():
     """_summary_
 
@@ -169,7 +174,8 @@ def main():
 
     arguments["config"].close()
 
-    urllib3.disable_warnings(urllib3.exceptions.SecurityWarning)
+    if config["pfsense"]["ssl_verify"] is False:
+        urllib3.disable_warnings(urllib3.exceptions.SecurityWarning)
 
     now = dt.now()
 
@@ -218,10 +224,10 @@ def main():
                 ]
             )
             f.write(
-                f'pfsense_backup_timestamp_seconds{{url="{ config["pfsense"]["url"] }"}} {int(now.timestamp())}\n'  # pylint: disable=line-too-long
+                f'pfsense_backup_timestamp_seconds{labels(config["pfsense"])} {int(now.timestamp())}\n'  # pylint: disable=line-too-long
             )
             f.write(
-                f'pfsense_backup_size_bytes{{url="{ config["pfsense"]["url"] }"}} {stat(out_file).st_size}\n'  # pylint: disable=line-too-long
+                f'pfsense_backup_size_bytes{labels(config["pfsense"])} {stat(out_file).st_size}\n'  # pylint: disable=line-too-long
             )
 
         rename(metrics_file + ".new", metrics_file)
