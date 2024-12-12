@@ -13,7 +13,7 @@ from schema import Schema, SchemaError, And, Or, Optional, Use
 
 import pfbackup
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 DEFAULT_CONFIGURATION_FILE = path.join(
     environ["HOME"], ".config", "pfsense-backup", "config.yml"
