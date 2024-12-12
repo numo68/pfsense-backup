@@ -3,15 +3,17 @@ from the pfSense firewall
 """
 
 import argparse
-import logging
 import re
-
-from os import environ, path, scandir, remove
+from os import environ, path, scandir, stat, remove, rename
 from datetime import datetime as dt
+import urllib3
+
 from yaml import safe_load
 from schema import Schema, SchemaError, And, Or, Optional, Use
 
 import pfbackup
+
+__version__ = "0.2.0"
 
 DEFAULT_CONFIGURATION_FILE = path.join(
     environ["HOME"], ".config", "pfsense-backup", "config.yml"
@@ -42,6 +44,12 @@ SCHEMA = Schema(
                 Optional("keep"): And(Use(int), lambda x: x > 0),
             },
         ),
+        Optional("metrics"): Schema(
+            {
+                "directory": And(str, lambda s: len(s) > 0),
+                Optional("suffix"): And(str, lambda s: len(s) > 0),
+            },
+        ),
     }
 )
 
@@ -57,7 +65,7 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser(
         prog="pfsense-backup",
-        description="A tool to fetch backups from the pfSense firewall",
+        description=f"A tool to fetch backups from the pfSense firewall (v{ __version__ })",
     )
 
     parser.add_argument(
@@ -161,6 +169,10 @@ def main():
 
     arguments["config"].close()
 
+    urllib3.disable_warnings(urllib3.exceptions.SecurityWarning)
+
+    now = dt.now()
+
     # If the file was given through an argument, use that and skip the rotation
     # If not, use the configuration to construct the file name and do the rotation
     # if requested and the directory was provided as an absolute path
@@ -170,16 +182,46 @@ def main():
     else:
         if not path.isdir(config["output"]["directory"]):
             raise ValueError(
-                f"Target directory {config['output']['directory']} does not exist or is not a directory"
+                f"Target directory {config['output']['directory']} does not exist or is not a directory"  # pylint: disable=line-too-long
             )
         rotate = (
             path.isabs(config["output"]["directory"]) and "keep" in config["output"]
         )
         out_file = path.join(
-            config["output"]["directory"], dt.now().strftime(config["output"]["name"])
+            config["output"]["directory"], now.strftime(config["output"]["name"])
         )
 
     fetch_backup(config["pfsense"], out_file)
 
     if rotate:
         rotate_files(config["output"])
+
+    if "metrics" in config:
+        if not path.isdir(config["metrics"]["directory"]):
+            raise ValueError(
+                f"Metrics directory {config['metrics']['directory']} does not exist or is not a directory"  # pylint: disable=line-too-long
+            )
+
+        metrics_file = path.join(config["metrics"]["directory"], "pfsense-backup")
+        if "suffix" in config["metrics"]:
+            metrics_file += "-" + config["metrics"]["suffix"]
+
+        metrics_file += ".prom"
+
+        with open(metrics_file + ".new", "w", encoding="utf-8") as f:
+            f.writelines(
+                [
+                    "# HELP pfsense_backup_timestamp_seconds Time the backup was started.\n",
+                    "# TYPE pfsense_backup_timestamp_seconds counter\n\n"
+                    "# HELP pfsense_backup_size_bytes Size of the backup.\n",
+                    "# TYPE pfsense_backup_size_bytes gauge\n\n",
+                ]
+            )
+            f.write(
+                f'pfsense_backup_timestamp_seconds{{url="{ config["pfsense"]["url"] }"}} {int(now.timestamp())}\n'  # pylint: disable=line-too-long
+            )
+            f.write(
+                f'pfsense_backup_size_bytes{{url="{ config["pfsense"]["url"] }"}} {stat(out_file).st_size}\n'  # pylint: disable=line-too-long
+            )
+
+        rename(metrics_file + ".new", metrics_file)
