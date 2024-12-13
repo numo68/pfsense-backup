@@ -4,16 +4,18 @@ from the pfSense firewall
 
 import argparse
 import re
-from os import environ, path, scandir, stat, remove, rename
+from os import environ, path, scandir, stat, remove
 from datetime import datetime as dt
-import urllib3
+from urllib.parse import urlparse
 
+import urllib3
 from yaml import safe_load
 from schema import Schema, SchemaError, And, Or, Optional, Use
+from prometheus_client import Gauge, CollectorRegistry, write_to_textfile
 
 import pfbackup
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 DEFAULT_CONFIGURATION_FILE = path.join(
     environ["HOME"], ".config", "pfsense-backup", "config.yml"
@@ -148,11 +150,6 @@ def rotate_files(output_config: dict):
         remove(path.join(output_config["directory"], files.pop(0)))
 
 
-def labels(pfsense_config):
-    """Output Prometheus labels"""
-    return f'{{url="{ pfsense_config["url"] }"}}'
-
-
 def main():
     """_summary_
 
@@ -203,6 +200,20 @@ def main():
         rotate_files(config["output"])
 
     if "metrics" in config:
+        registry = CollectorRegistry()
+        backup_time = Gauge(
+            "pfsense_backup_timestamp_seconds",
+            "Time the backup was started.",
+            ["host"],
+            registry=registry,
+        )
+        backup_size = Gauge(
+            "pfsense_backup_size_bytes",
+            "Size of the backup.",
+            ["host"],
+            registry=registry,
+        )
+
         if not path.isdir(config["metrics"]["directory"]):
             raise ValueError(
                 f"Metrics directory {config['metrics']['directory']} does not exist or is not a directory"  # pylint: disable=line-too-long
@@ -214,20 +225,8 @@ def main():
 
         metrics_file += ".prom"
 
-        with open(metrics_file + ".new", "w", encoding="utf-8") as f:
-            f.writelines(
-                [
-                    "# HELP pfsense_backup_timestamp_seconds Time the backup was started.\n",
-                    "# TYPE pfsense_backup_timestamp_seconds counter\n\n"
-                    "# HELP pfsense_backup_size_bytes Size of the backup.\n",
-                    "# TYPE pfsense_backup_size_bytes gauge\n\n",
-                ]
-            )
-            f.write(
-                f'pfsense_backup_timestamp_seconds{labels(config["pfsense"])} {int(now.timestamp())}\n'  # pylint: disable=line-too-long
-            )
-            f.write(
-                f'pfsense_backup_size_bytes{labels(config["pfsense"])} {stat(out_file).st_size}\n'  # pylint: disable=line-too-long
-            )
+        host = urlparse(config["pfsense"]["url"]).hostname
+        backup_time.labels(host).set_to_current_time()
+        backup_size.labels(host).set(stat(out_file).st_size)
 
-        rename(metrics_file + ".new", metrics_file)
+        write_to_textfile(metrics_file, registry)
