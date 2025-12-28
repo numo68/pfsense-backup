@@ -43,7 +43,7 @@ Configuration file
 
 All fields except ``password`` are optional.
 
-``host`` is a host name or an IP address.
+``url`` is a host name or an IP address.
 
 ``name`` specifies the name of the output file. ``strftime`` directives
 are allowed.
